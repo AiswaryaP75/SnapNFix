@@ -23,13 +23,13 @@ backend/src/services/     Cloudinary uploads
 ## Run locally
 
 1. Install root dependencies with `npm install`, then install app dependencies with `npm install --prefix frontend` and `npm install --prefix backend`.
-2. Copy `backend/.env.example` to `backend/.env`. Set your Atlas `MONGODB_URI`, a private random `JWT_SECRET`, and the initial `ADMIN_EMAIL`, `ADMIN_NAME`, and unique `ADMIN_PASSWORD` (at least 12 characters).
-3. In Atlas, create a database user, allow your development IP in Network Access, and use its connection string as `MONGODB_URI`. Never commit `.env` or paste credentials into chat. Add Cloudinary credentials to `backend/.env` for report and proof photos. Copy `frontend/.env.example` to `frontend/.env` only if the API URL differs from `http://localhost:5000`.
+2. Copy `backend/.env.example` to `backend/.env`. Replace the MongoDB URI placeholders with your Atlas connection string, set a private random `JWT_SECRET`, and set the initial `ADMIN_EMAIL`, `ADMIN_NAME`, and unique `ADMIN_PASSWORD` (at least 12 characters).
+3. In Atlas, create a database user, allow your development IP in Network Access, and use its connection string as `MONGODB_URI`. URL-encode special characters in the database username or password. Never commit `.env` or paste credentials into chat. Add Cloudinary credentials to `backend/.env` for report and proof photos. Copy `frontend/.env.example` to `frontend/.env` only if the API URL differs from `http://localhost:5000`.
 4. Create the first administrator with `npm --prefix backend run seed:admin`. Run `npm run dev` from the project root. The frontend is served at `http://localhost:5173` and the API at `http://localhost:5000`.
 
 The map dashboard opens in demo mode with sample West Village reports. Authentication and issue persistence require the backend environment above. Sign-in routes are `/login/citizen`, `/login/officer`, `/login/worker`, and `/login/admin`. Citizen registration is available through `POST /api/auth/register` with `name`, `email`, and `password`; officer and worker accounts must be provisioned by an administrator.
 
-The first administrator is seeded from the local environment variables. Sign in at `/login/admin` to create staff accounts, edit staff names/emails/roles, reset passwords, or deactivate/reactivate access. Passwords are stored as bcrypt hashes and are never displayed; distribute temporary passwords securely. Changing a staff password, email, role, or active state revokes their existing sessions. If an Atlas URI was previously stored in a tracked file, rotate that database user's password in Atlas before using it.
+The API loads configuration from `backend/.env` and waits for MongoDB to connect before listening. The first administrator is seeded from the local environment variables. Sign in at `/login/admin` to create staff accounts, edit staff names/emails/roles, reset passwords, or deactivate/reactivate access. Passwords are stored as bcrypt hashes and are never displayed; distribute temporary passwords securely. Changing a staff password, email, role, or active state revokes their existing sessions. Rotate the Atlas database user's password and Cloudinary API secret if they were previously stored in a tracked file.
 
 ## API overview
 

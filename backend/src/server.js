@@ -1,4 +1,5 @@
-require('dotenv').config()
+const path = require('path')
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') })
 const express = require('express')
 const mongoose = require('mongoose')
 const cors = require('cors')
@@ -33,14 +34,20 @@ app.use((error, _req, res, _next) => {
   res.status(status).json({ message: status === 500 ? 'Something went wrong.' : error.message })
 })
 
-if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET must be set in backend/.env')
-if (process.env.MONGODB_URI) {
-  mongoose.connect(process.env.MONGODB_URI).catch((error) => {
+async function startServer() {
+  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET must be set in backend/.env')
+  if (!process.env.MONGODB_URI) throw new Error('MONGODB_URI must be set in backend/.env')
+
+  try {
+    await mongoose.connect(process.env.MONGODB_URI)
+    console.log('Connected to MongoDB')
+  } catch (error) {
     console.error('MongoDB connection failed:', error.message)
-    process.exit(1)
-  })
-} else {
-  console.warn('MONGODB_URI is not set. API routes requiring MongoDB will be unavailable.')
+    process.exitCode = 1
+    return
+  }
+
+  app.listen(port, () => console.log(`SnapNFix API listening on http://localhost:${port}`))
 }
 
-app.listen(port, () => console.log(`SnapNFix API listening on http://localhost:${port}`))
+startServer()

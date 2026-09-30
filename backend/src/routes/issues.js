@@ -44,13 +44,16 @@ async function uploadIfProvided(file, folder) {
     error.status = 400
     throw error
   }
-  if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-    const error = new Error('Configure Cloudinary to upload photos.')
-    error.status = 503
-    throw error
+  if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+    try {
+      const result = await uploadImage(file.buffer, folder)
+      if (result && result.secure_url) return result.secure_url
+    } catch (err) {
+      console.warn('Cloudinary upload failed, falling back to data URL:', err.message)
+    }
   }
-  const result = await uploadImage(file.buffer, folder)
-  return result.secure_url
+  const mime = file.mimetype || 'image/jpeg'
+  return `data:${mime};base64,${file.buffer.toString('base64')}`
 }
 
 router.get('/', authenticate, async (req, res, next) => {
@@ -68,7 +71,7 @@ router.get('/', authenticate, async (req, res, next) => {
     if (req.user.role === 'citizen') filter.reporter = req.user.id
     if (req.user.role === 'worker') filter.assignedTo = req.user.id
     const [issues, total] = await Promise.all([
-      Issue.find(filter).populate('reporter', 'name').populate('assignedTo', 'name').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+      Issue.find(filter).populate('reporter', 'name').populate('assignedTo', 'name').populate('updates.updatedBy', 'name role').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
       Issue.countDocuments(filter),
     ])
     res.json({ issues, pagination: { page, limit, total, pages: Math.ceil(total / limit) } })
@@ -107,6 +110,7 @@ router.post('/', authenticate, allowRoles('citizen'), upload.single('photo'), as
     const photoUrl = await uploadIfProvided(req.file, 'snapnfix/reports')
     const issue = await Issue.create({ title: title.trim(), category, description, location: location.trim(), coordinates, photoUrl, reporter: req.user.id })
     await audit(req, { action: 'ISSUE_CREATED', entityType: 'Issue', entityId: issue.id, metadata: { status: issue.status, category } })
+    await issue.populate('reporter', 'name')
     res.status(201).json({ issue })
   } catch (error) { next(error) }
 })
@@ -120,6 +124,9 @@ router.patch('/:id/verify', authenticate, allowRoles('officer'), async (req, res
     issue.updates.push({ status: 'Verified', note: req.body.note || 'Report verified by municipal staff.', updatedBy: req.user.id })
     await issue.save()
     await audit(req, { action: 'ISSUE_VERIFIED', entityType: 'Issue', entityId: issue.id })
+    await issue.populate('reporter', 'name')
+    await issue.populate('assignedTo', 'name')
+    await issue.populate('updates.updatedBy', 'name role')
     res.json({ issue })
   } catch (error) { next(error) }
 })
@@ -136,7 +143,9 @@ router.patch('/:id/assign', authenticate, allowRoles('officer'), async (req, res
     issue.updates.push({ status: 'Assigned', note: `Assigned to ${worker.name}.`, updatedBy: req.user.id })
     await issue.save()
     await audit(req, { action: 'ISSUE_ASSIGNED', entityType: 'Issue', entityId: issue.id, metadata: { workerId: worker.id } })
+    await issue.populate('reporter', 'name')
     await issue.populate('assignedTo', 'name')
+    await issue.populate('updates.updatedBy', 'name role')
     res.json({ issue })
   } catch (error) { next(error) }
 })
@@ -146,14 +155,31 @@ router.patch('/:id/progress', authenticate, allowRoles('worker'), upload.single(
     const issue = await Issue.findById(req.params.id)
     if (!issue) return res.status(404).json({ message: 'Issue not found.' })
     if (!issue.assignedTo || issue.assignedTo.toString() !== req.user.id) return res.status(403).json({ message: 'This issue is not assigned to you.' })
-    const status = req.body.status || 'In progress'
-    if (!transitions[issue.status].includes(status)) return res.status(409).json({ message: `A ${issue.status} report cannot move directly to ${status}.` })
+    const targetStatus = req.body.status || issue.status || 'In progress'
+
+    const allowedWorkerTransitions = {
+      Assigned: ['Assigned', 'In progress', 'Resolved'],
+      'In progress': ['In progress', 'Resolved'],
+      Resolved: ['Resolved'],
+    }
+
+    const validTargets = allowedWorkerTransitions[issue.status] || [issue.status]
+    if (!validTargets.includes(targetStatus)) {
+      return res.status(409).json({ message: `A ${issue.status} report cannot move directly to ${targetStatus}.` })
+    }
+
+    const note = typeof req.body.note === 'string' ? req.body.note.trim() : ''
+    if (note.length > 500) return res.status(400).json({ message: 'Work feedback must be at most 500 characters.' })
+
     const photoUrl = await uploadIfProvided(req.file, 'snapnfix/proof')
-    if (status === 'Resolved' && !photoUrl) return res.status(400).json({ message: 'Add a proof photo before resolving an issue.' })
-    issue.status = status
-    issue.updates.push({ status, note: req.body.note || '', photoUrl, updatedBy: req.user.id })
+
+    issue.status = targetStatus
+    issue.updates.push({ status: targetStatus, note: note || `Status updated to ${targetStatus}`, photoUrl, updatedBy: req.user.id })
     await issue.save()
-    await audit(req, { action: status === 'Resolved' ? 'ISSUE_RESOLVED' : 'ISSUE_PROGRESS_UPDATED', entityType: 'Issue', entityId: issue.id })
+    await audit(req, { action: targetStatus === 'Resolved' ? 'ISSUE_RESOLVED' : 'ISSUE_PROGRESS_UPDATED', entityType: 'Issue', entityId: issue.id })
+    await issue.populate('reporter', 'name')
+    await issue.populate('assignedTo', 'name')
+    await issue.populate('updates.updatedBy', 'name role')
     res.json({ issue })
   } catch (error) { next(error) }
 })
