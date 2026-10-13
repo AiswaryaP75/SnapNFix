@@ -648,8 +648,8 @@ function App() {
   // Password Change Screen
   if (screen === 'password-change' && passwordChangeRequired) {
     return (
-      <main className="auth-shell">
-        <div className="auth-card">
+      <main className="auth-shell page-enter" key="password-change">
+        <div className="auth-card panel-enter">
           <div className="auth-header">
             <div className="brand-logo"><MapPin size={22} /> SnapNFix</div>
             <h2>Set Personal Password</h2>
@@ -676,7 +676,7 @@ function App() {
   if (screen === 'login') {
     const RoleIcon = roles[role].icon
     return (
-      <main className="auth-shell">
+      <main className="auth-shell page-enter" key={`login-${role}`}>
         <div className="auth-container">
           <header className="auth-topbar">
             <a className="brand-logo" href="/" onClick={(e) => { e.preventDefault(); go('dashboard') }}>
@@ -687,8 +687,8 @@ function App() {
             </button>
           </header>
 
-          <div className="auth-grid">
-            <div className={`auth-banner role-${roles[role].color}`}>
+          <div className="auth-grid panel-enter">
+            <div className={`auth-banner role-${roles[role].color}`} key={`banner-${role}`}>
               <div className="role-badge"><RoleIcon size={18} /> {roles[role].label} Portal</div>
               <h1>{roles[role].title}</h1>
               <p>{roles[role].description}</p>
@@ -699,7 +699,7 @@ function App() {
               </div>
             </div>
 
-            <div className="auth-form-card">
+            <div className="auth-form-card" key={`form-${role}-${authMode}`}>
               <h2>{authMode === 'register' ? 'Create Citizen Account' : `Sign in as ${roles[role].label}`}</h2>
               <p className="auth-subtitle">Enter your credentials to access your workspace.</p>
 
@@ -760,7 +760,7 @@ function App() {
     const visibleStaff = staff.filter((m) => `${m.name} ${m.email} ${m.role}`.toLowerCase().includes(search.toLowerCase()))
 
     return (
-      <div className="app-layout">
+      <div className="app-layout page-enter" key="admin">
         <header className="navbar">
           <div className="nav-left">
             <a className="brand-logo" href="/admin" onClick={(e) => e.preventDefault()}>
@@ -781,7 +781,7 @@ function App() {
           </div>
         </header>
 
-        <main className="main-container">
+        <main className="main-container content-stagger">
           <div className="page-header">
             <div>
               <h1>Municipal Staff Directory</h1>
@@ -889,7 +889,7 @@ function App() {
 
   // Main Dashboard View
   return (
-    <div className="app-layout">
+    <div className="app-layout page-enter" key={`dashboard-${role}`}>
       {/* Top Navbar */}
       <header className="navbar">
         <div className="nav-left">
@@ -938,7 +938,7 @@ function App() {
       </header>
 
       {/* Main Content Body */}
-      <main className="main-container">
+      <main className="main-container content-stagger">
         {/* Banner Section */}
         <section className="hero-banner">
           <div className="hero-text">
