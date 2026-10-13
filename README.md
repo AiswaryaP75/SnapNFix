@@ -4,7 +4,7 @@ SnapNFix connects residents with municipal teams to report, assign, and resolve 
 
 ## Stack
 
-- Frontend: React, Vite, Leaflet, React Leaflet
+- Frontend: React, Vite, OpenStreetMap (OpenLayers)
 - Backend: Node.js, Express
 - Database: MongoDB Atlas with Mongoose
 - Authentication: JWT and bcrypt

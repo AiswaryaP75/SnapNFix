@@ -68,7 +68,7 @@ router.get('/', authenticate, async (req, res, next) => {
       const safeSearch = escapeRegex(String(search).slice(0, 80))
       filter.$or = [{ title: new RegExp(safeSearch, 'i') }, { location: new RegExp(safeSearch, 'i') }, { ticketId: new RegExp(safeSearch, 'i') }]
     }
-    if (req.user.role === 'citizen') filter.reporter = req.user.id
+    if (req.user.role === 'citizen' && req.query.scope !== 'all') filter.reporter = req.user.id
     if (req.user.role === 'worker') filter.assignedTo = req.user.id
     const [issues, total] = await Promise.all([
       Issue.find(filter).populate('reporter', 'name').populate('assignedTo', 'name').populate('updates.updatedBy', 'name role').sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
