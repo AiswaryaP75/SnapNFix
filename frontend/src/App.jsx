@@ -1,11 +1,10 @@
 import { useEffect, useEffectEvent, useState } from 'react'
-import { MapContainer, Marker, TileLayer, ZoomControl } from 'react-leaflet'
-import L from 'leaflet'
+import { OpenStreetMap, LocationPickerMap } from './components/OpenStreetMap'
 import {
-  ArrowDown, ArrowLeft, ArrowRight, ArrowUpRight, Bell, Camera, Check,
-  ChevronDown, CircleAlert, ClipboardList, Clock3, Crosshair, Droplets,
-  HardHat, KeyRound, LocateFixed, LogOut, MapPin, Menu, MessageSquareText,
-  Navigation, Plus, Power, Search, ShieldCheck, Sparkles, Trash2, TrafficCone, Upload, UserCog, Users, X, Zap,
+  ArrowLeft, ArrowRight, ArrowUpRight, Check, CircleAlert, Clock3,
+  Crosshair, Droplets, HardHat, KeyRound, LocateFixed, LogOut, MapPin,
+  MessageSquareText, Navigation, Plus, Power, Search, ShieldCheck,
+  Sparkles, Trash2, TrafficCone, UserCog, Users, X, Zap,
 } from 'lucide-react'
 import './App.css'
 
@@ -128,14 +127,6 @@ const categories = [
   { name: 'Other', icon: CircleAlert },
 ]
 
-function markerIcon(color) {
-  return L.divIcon({
-    className: 'issue-marker-wrap',
-    html: `<span class="issue-marker marker-${color}"></span>`,
-    iconSize: [18, 18],
-    iconAnchor: [9, 9]
-  })
-}
 
 function issueView(issue) {
   return {
@@ -176,12 +167,12 @@ function App() {
   const [activeFilter, setActiveFilter] = useState('All reports')
   const [issues, setIssues] = useState(initialIssues)
   const [showReport, setShowReport] = useState(false)
-  const [showMobileNav, setShowMobileNav] = useState(false)
+  const [recenterCount, setRecenterCount] = useState(0)
   const [search, setSearch] = useState('')
   const [notice, setNotice] = useState('')
   const [preview, setPreview] = useState('')
   const [reportCoords, setReportCoords] = useState(null)
-  const [locationMode, setLocationMode] = useState('manual')
+  const [locationMode, setLocationMode] = useState('map')
   const [reportLocation, setReportLocation] = useState('')
   const [selectedIssue, setSelectedIssue] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -210,7 +201,8 @@ function App() {
   const refreshIssues = async (token = localStorage.getItem('snapnfix-token')) => {
     if (!token) return
     try {
-      const response = await fetch(`${apiUrl}/api/issues`, { headers: { Authorization: `Bearer ${token}` } })
+      const scopeQuery = role === 'citizen' ? '?scope=all' : ''
+      const response = await fetch(`${apiUrl}/api/issues${scopeQuery}`, { headers: { Authorization: `Bearer ${token}` } })
       if (response.status === 401) {
         localStorage.removeItem('snapnfix-token')
         localStorage.removeItem('snapnfix-user')
@@ -369,16 +361,32 @@ function App() {
     return coordinates
   }
 
+  const handlePickCoords = async ({ lat, lng }) => {
+    setReportCoords({ lat, lng })
+    setLocationMode('map')
+    setReportLocation(`Map Location (${lat.toFixed(6)}, ${lng.toFixed(6)})`)
+    try {
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`)
+      if (response.ok) {
+        const data = await response.json()
+        if (data.display_name) {
+          const parts = data.display_name.split(', ')
+          setReportLocation(parts.slice(0, 3).join(', '))
+        }
+      }
+    } catch { /* fallback to coords string */ }
+  }
+
   const useCurrentLocation = () => {
     if (!navigator.geolocation) return setNotice('Geolocation is not supported by this browser.')
     setNotice('Finding your current location...')
     navigator.geolocation.getCurrentPosition(({ coords }) => {
-      const coordinates = { lat: coords.latitude, lng: coords.longitude }
+      const coordinates = { lat: Number(coords.latitude.toFixed(6)), lng: Number(coords.longitude.toFixed(6)) }
       setLocationMode('current')
       setReportCoords(coordinates)
-      setReportLocation(`Current location (${coordinates.lat.toFixed(6)}, ${coordinates.lng.toFixed(6)})`)
+      setReportLocation(`Current location (${coordinates.lat}, ${coordinates.lng})`)
       setNotice('Current location captured.')
-    }, () => setNotice('Unable to access your location. Please enter the location manually.'))
+    }, () => setNotice('Unable to access your location. Please select on the OpenStreetMap or enter manually.'))
   }
 
   const openDirections = (issue) => {
@@ -386,7 +394,7 @@ function App() {
       setNotice('Directions are unavailable because this report has no map coordinates.')
       return
     }
-    window.open(`https://www.google.com/maps/dir/?api=1&destination=${issue.lat},${issue.lng}`, '_blank', 'noopener,noreferrer')
+    window.open(`https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${issue.lat}%2C${issue.lng}`, '_blank', 'noopener,noreferrer')
   }
 
   const submitIssue = async (event) => {
@@ -394,8 +402,11 @@ function App() {
     const data = new FormData(event.currentTarget)
     const token = localStorage.getItem('snapnfix-token')
     try {
-      const coordinates = locationMode === 'manual' ? await geocodeLocation(reportLocation) : reportCoords
-      if (!coordinates) throw new Error('Choose current location or enter a location before submitting.')
+      let coordinates = reportCoords
+      if (!coordinates && reportLocation) {
+        coordinates = await geocodeLocation(reportLocation)
+      }
+      if (!coordinates) throw new Error('Please pick a location on OpenStreetMap, choose current location, or enter a valid address.')
       data.set('lat', String(coordinates.lat))
       data.set('lng', String(coordinates.lng))
       if (token) {
@@ -403,13 +414,16 @@ function App() {
           method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: data,
         })
         const result = await response.json()
-        if (response.ok && result.issue) {
+        if (!response.ok) throw new Error(result.message || 'Unable to submit report to server.')
+        if (result.issue) {
           const formatted = issueView(result.issue)
           setIssues((current) => [formatted, ...current])
           await refreshMetrics(token)
           setShowReport(false)
           setPreview('')
-          setNotice('Your report has been submitted and added to the live map.')
+          setReportCoords(null)
+          setReportLocation('')
+          setNotice('Your report has been submitted and added to OpenStreetMap.')
           return
         }
       }
@@ -432,6 +446,8 @@ function App() {
       setIssues((current) => [newIssue, ...current])
       setShowReport(false)
       setPreview('')
+      setReportCoords(null)
+      setReportLocation('')
       setNotice('Report submitted successfully.')
     } catch (error) {
       setNotice(error.message)
@@ -466,7 +482,8 @@ function App() {
           method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({}),
         })
         const result = await response.json()
-        if (response.ok && result.issue) {
+        if (!response.ok) throw new Error(result.message || 'Unable to verify report.')
+        if (result.issue) {
           const updated = issueView(result.issue)
           setIssues((current) => current.map((item) => item.dbId === issue.dbId ? updated : item))
           if (selectedIssue?.dbId === issue.dbId) setSelectedIssue(updated)
@@ -474,7 +491,10 @@ function App() {
           setNotice(`${issue.id} marked as verified.`)
           return
         }
-      } catch { /* Fall through to local update */ }
+      } catch (error) {
+        setNotice(error.message)
+        return
+      }
     }
     // Local state fallback
     const verifiedUpdate = {
@@ -518,7 +538,8 @@ function App() {
             body: JSON.stringify({ workerId }),
           })
           const result = await response.json()
-          if (response.ok && result.issue) {
+          if (!response.ok) throw new Error(result.message || 'Unable to assign worker.')
+          if (result.issue) {
             const updated = issueView(result.issue)
             setIssues((current) => current.map((item) => item.dbId === issue.dbId ? updated : item))
             if (selectedIssue?.dbId === issue.dbId) setSelectedIssue(updated)
@@ -615,7 +636,11 @@ function App() {
   const mapCenter = mapIssue ? [mapIssue.lat, mapIssue.lng] : [40.735, -74.000]
 
   const filteredIssues = issues.filter((issue) => {
-    const matchesFilter = activeFilter === 'All reports' || issue.status === activeFilter
+    const matchesFilter = activeFilter === 'All reports'
+      ? true
+      : activeFilter === 'My reports'
+        ? (account && (issue.reporter === account.name || issue.reporter === 'You'))
+        : issue.status === activeFilter
     const matchesSearch = `${issue.title} ${issue.street} ${issue.id} ${issue.assignedTo}`.toLowerCase().includes(search.toLowerCase())
     return matchesFilter && matchesSearch
   })
@@ -623,8 +648,8 @@ function App() {
   // Password Change Screen
   if (screen === 'password-change' && passwordChangeRequired) {
     return (
-      <main className="auth-shell">
-        <div className="auth-card">
+      <main className="auth-shell page-enter" key="password-change">
+        <div className="auth-card panel-enter">
           <div className="auth-header">
             <div className="brand-logo"><MapPin size={22} /> SnapNFix</div>
             <h2>Set Personal Password</h2>
@@ -651,7 +676,7 @@ function App() {
   if (screen === 'login') {
     const RoleIcon = roles[role].icon
     return (
-      <main className="auth-shell">
+      <main className="auth-shell page-enter" key={`login-${role}`}>
         <div className="auth-container">
           <header className="auth-topbar">
             <a className="brand-logo" href="/" onClick={(e) => { e.preventDefault(); go('dashboard') }}>
@@ -662,8 +687,8 @@ function App() {
             </button>
           </header>
 
-          <div className="auth-grid">
-            <div className={`auth-banner role-${roles[role].color}`}>
+          <div className="auth-grid panel-enter">
+            <div className={`auth-banner role-${roles[role].color}`} key={`banner-${role}`}>
               <div className="role-badge"><RoleIcon size={18} /> {roles[role].label} Portal</div>
               <h1>{roles[role].title}</h1>
               <p>{roles[role].description}</p>
@@ -674,7 +699,7 @@ function App() {
               </div>
             </div>
 
-            <div className="auth-form-card">
+            <div className="auth-form-card" key={`form-${role}-${authMode}`}>
               <h2>{authMode === 'register' ? 'Create Citizen Account' : `Sign in as ${roles[role].label}`}</h2>
               <p className="auth-subtitle">Enter your credentials to access your workspace.</p>
 
@@ -689,8 +714,8 @@ function App() {
                 <label>Email Address
                   <input name="email" type="email" placeholder="name@example.com" required />
                 </label>
-                <label>Password
-                  <input name="password" type="password" placeholder="••••••••" required minLength={authMode === 'register' ? 8 : 6} />
+                <label>{authMode === 'register' ? 'Password (min 8 characters, letter & number)' : 'Password'}
+                  <input name="password" type="password" placeholder={authMode === 'register' ? 'Must contain letter & number' : '••••••••'} required minLength={authMode === 'register' ? 8 : 6} />
                 </label>
                 <button className="button button-primary" type="submit" disabled={busy}>
                   {busy ? 'Authenticating...' : authMode === 'register' ? 'Create Account' : 'Sign In'} <ArrowRight size={16} />
@@ -735,7 +760,7 @@ function App() {
     const visibleStaff = staff.filter((m) => `${m.name} ${m.email} ${m.role}`.toLowerCase().includes(search.toLowerCase()))
 
     return (
-      <div className="app-layout">
+      <div className="app-layout page-enter" key="admin">
         <header className="navbar">
           <div className="nav-left">
             <a className="brand-logo" href="/admin" onClick={(e) => e.preventDefault()}>
@@ -756,7 +781,7 @@ function App() {
           </div>
         </header>
 
-        <main className="main-container">
+        <main className="main-container content-stagger">
           <div className="page-header">
             <div>
               <h1>Municipal Staff Directory</h1>
@@ -864,21 +889,40 @@ function App() {
 
   // Main Dashboard View
   return (
-    <div className="app-layout">
+    <div className="app-layout page-enter" key={`dashboard-${role}`}>
       {/* Top Navbar */}
       <header className="navbar">
         <div className="nav-left">
-          <a className="brand-logo" href="/" onClick={(e) => e.preventDefault()}>
+          <a className="brand-logo" href="/" onClick={(e) => { e.preventDefault(); go('dashboard') }}>
             <MapPin size={22} /> Snap<span>N</span>Fix
           </a>
+          {!account && (
+            <div className="portal-quick-tabs">
+              {Object.entries(roles).map(([key, item]) => (
+                <button
+                  key={key}
+                  className={`portal-tab ${role === key ? 'active' : ''}`}
+                  onClick={() => setRole(key)}
+                  title={`Switch to ${item.label} view`}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="nav-right">
+          {account?.role === 'admin' && (
+            <button className="button button-primary button-sm" onClick={() => go('admin', 'admin')}>
+              <UserCog size={14} /> Staff Directory
+            </button>
+          )}
           <div className="user-profile">
             <div className="avatar-circle">{account?.name?.slice(0, 2).toUpperCase() || (role === 'citizen' ? 'JR' : role === 'officer' ? 'MO' : 'FW')}</div>
             <div className="user-details">
-              <strong>{account?.name || (role === 'citizen' ? 'Jordan Rivera' : roles[role].label)}</strong>
-              <small>{account ? account.role : `${roles[role].label} View`}</small>
+              <strong>{account?.name || (role === 'citizen' ? 'Community Guest' : roles[role].label)}</strong>
+              <small>{account ? account.role.toUpperCase() : `${roles[role].label} Demo View`}</small>
             </div>
           </div>
           {account ? (
@@ -894,7 +938,7 @@ function App() {
       </header>
 
       {/* Main Content Body */}
-      <main className="main-container">
+      <main className="main-container content-stagger">
         {/* Banner Section */}
         <section className="hero-banner">
           <div className="hero-text">
@@ -943,30 +987,26 @@ function App() {
 
         {/* Map & Issues Content Split */}
         <div className="dashboard-grid">
-          {/* Interactive Map Card */}
+          {/* Interactive OpenStreetMap Card */}
           <section className="card map-card">
             <div className="card-header">
               <div>
-                <h2>Live Issue Map</h2>
-                <p>Showing {filteredIssues.length} geotagged report pins</p>
+                <h2>Live Issue Map (OpenStreetMap)</h2>
+                <p>Showing {filteredIssues.filter((i) => Number.isFinite(i.lat) && Number.isFinite(i.lng)).length} geotagged report pins</p>
               </div>
-              <button className="button button-outline button-sm" onClick={() => setNotice('Centered on active reports.')}>
+              <button className="button button-outline button-sm" onClick={() => { setRecenterCount((c) => c + 1); setNotice('Centered on active reports.') }}>
                 <LocateFixed size={14} /> Recenter Map
               </button>
             </div>
             <div className="map-wrapper">
-              <MapContainer key={mapCenter.join(',')} center={mapCenter} zoom={14} zoomControl={false} scrollWheelZoom={false} className="leaflet-container">
-                <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                <ZoomControl position="bottomright" />
-                {filteredIssues.filter((i) => Number.isFinite(i.lat) && Number.isFinite(i.lng)).map((issue) => (
-                  <Marker
-                    key={issue.id}
-                    position={[issue.lat, issue.lng]}
-                    icon={markerIcon(issue.color)}
-                    eventHandlers={{ click: () => setSelectedIssue(issue) }}
-                  />
-                ))}
-              </MapContainer>
+              <OpenStreetMap
+                issues={filteredIssues}
+                center={mapCenter}
+                zoom={14}
+                selectedIssue={selectedIssue}
+                onSelectIssue={(issue) => setSelectedIssue(issue)}
+                recenterTrigger={recenterCount}
+              />
             </div>
           </section>
 
@@ -985,7 +1025,7 @@ function App() {
 
             {/* Filter Pills */}
             <div className="filter-pills-bar">
-              {['All reports', 'Submitted', 'Verified', 'Assigned', 'In progress', 'Resolved'].map((f) => (
+              {['All reports', ...(account?.role === 'citizen' ? ['My reports'] : []), 'Submitted', 'Verified', 'Assigned', 'In progress', 'Resolved'].map((f) => (
                 <button
                   key={f}
                   className={`filter-pill ${activeFilter === f ? 'active' : ''}`}
@@ -1110,14 +1150,24 @@ function App() {
               </label>
               <label>Issue Location
                 <div className="location-choice" role="group" aria-label="Choose issue location method">
+                  <button type="button" className={`location-choice-btn ${locationMode === 'map' ? 'active' : ''}`} onClick={() => setLocationMode('map')}>
+                    <Crosshair size={15} /> Pick on Map
+                  </button>
                   <button type="button" className={`location-choice-btn ${locationMode === 'current' ? 'active' : ''}`} onClick={useCurrentLocation}>
-                    <Crosshair size={15} /> Use current location
+                    <LocateFixed size={15} /> Current location
                   </button>
                   <button type="button" className={`location-choice-btn ${locationMode === 'manual' ? 'active' : ''}`} onClick={() => { setLocationMode('manual'); setReportCoords(null); setReportLocation('') }}>
-                    <MapPin size={15} /> Enter manually
+                    <MapPin size={15} /> Enter address
                   </button>
                 </div>
-                <input name="location" value={reportLocation} onChange={(event) => { setReportLocation(event.target.value); setReportCoords(null) }} placeholder="e.g. 8th Ave & W 14th St" required readOnly={locationMode === 'current'} />
+                {locationMode === 'map' && (
+                  <LocationPickerMap
+                    selectedCoords={reportCoords}
+                    onPickCoords={handlePickCoords}
+                    center={mapCenter}
+                  />
+                )}
+                <input name="location" value={reportLocation} onChange={(event) => { setReportLocation(event.target.value); setReportCoords(null) }} placeholder={locationMode === 'map' ? 'Click on the map above to select location' : 'e.g. 8th Ave & W 14th St'} required readOnly={locationMode === 'current'} />
               </label>
               <label>Description (Optional)
                 <textarea name="description" rows={3} placeholder="Describe the severity and impact..." maxLength={2000} />
@@ -1222,9 +1272,24 @@ function App() {
                 <div className="location-box">
                   <MapPin size={16} />
                   <span>{selectedIssue.street}</span>
-                  {(role === 'officer' || role === 'worker') && (
-                    <button className="button button-outline button-sm" onClick={() => openDirections(selectedIssue)}>
-                      <Navigation size={14} /> Get Directions
+                  <button className="button button-outline button-sm" onClick={() => openDirections(selectedIssue)}>
+                    <Navigation size={14} /> Directions
+                  </button>
+                </div>
+                <div className="detail-actions-row">
+                  {role === 'officer' && selectedIssue.status === 'Submitted' && (
+                    <button className="button button-secondary button-sm" onClick={() => { verifyIssue(selectedIssue); setSelectedIssue(null) }}>
+                      <ShieldCheck size={14} /> Verify Report
+                    </button>
+                  )}
+                  {role === 'officer' && selectedIssue.status === 'Verified' && (
+                    <button className="button button-primary button-sm" onClick={() => { openWorkflow('assign', selectedIssue); setSelectedIssue(null) }}>
+                      <Users size={14} /> Assign Worker
+                    </button>
+                  )}
+                  {role === 'worker' && (
+                    <button className="button button-primary button-sm" onClick={() => { openWorkflow('progress', selectedIssue); setSelectedIssue(null) }}>
+                      <MessageSquareText size={14} /> Post Feedback & Update Status
                     </button>
                   )}
                 </div>

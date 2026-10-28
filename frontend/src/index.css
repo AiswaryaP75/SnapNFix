@@ -1,4 +1,4 @@
-@import 'leaflet/dist/leaflet.css';
+@import 'ol/ol.css';
 
 :root {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -9,6 +9,10 @@
 
 * {
   box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
@@ -24,4 +28,14 @@ button, input, select, textarea {
 
 button {
   color: inherit;
+}
+
+a, button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
 }
